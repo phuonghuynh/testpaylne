@@ -1,13 +1,29 @@
 <?php
-namespace testpayline\Test;
+namespace testpayline\Tests;
 
-use Payline\Resources\Dispute;
-use Payline\Resources\Verification;
+
 use Payline\Settings;
 use testpayline\Tests\Fixtures;
+use Payline\Resources\User;
+use Payline\Resources\Application;
+use Payline\Resources\Identity;
+use Payline\Resources\Authorization;
+use Payline\Resources\PaymentInstrument;
+use Payline\Resources\BankAccount;
+use Payline\Resources\PaymentCard;
+use Payline\Resources\Transfer;
+use Payline\Resources\Dispute;
+use Payline\Resources\Evidence;
+use Payline\Resources\Webhook;
+use Payline\Resources\Verification;
+use Payline\Resources\Settlement;
+use Payline\Resources\Reversal;
+use Payline\Resources\Processor;
+use Payline\Resources\Merchant;
+use Payline\Resources\InstrumentUpdate;
 
-class ScenariosTest extends \PHPUnit_Framework_TestCase {
-
+class ScenariosTest extends \PHPUnit_Framework_TestCase
+{
     private $partnerUser;
     private $user;
     private $application;
@@ -15,16 +31,6 @@ class ScenariosTest extends \PHPUnit_Framework_TestCase {
     private $identity;
     private $merchant;
     private $card;
-    private $cardVerification;
-    private $pushFundTransfer;
-    private $bankAccount;
-    private $pushFundTransferReversal;
-    private $webhook;
-    private $authorization;
-    private $identityVerification;
-    private $pushFundTransfer2;
-    private $pushFundTransfer1;
-    private $settlement;
     private $receiptImage;
 
     protected function setUp()
@@ -50,88 +56,189 @@ class ScenariosTest extends \PHPUnit_Framework_TestCase {
         Settings::configure(["username" => $this->partnerUser->id, "password" => $this->partnerUser->password]);
 
         $this->identity = Fixtures::createIdentity();
-
+        $this->bankAccount = Fixtures::createBankAccount($this->identity);
         $this->merchant = Fixtures::provisionMerchant($this->identity);
 
         $this->card = Fixtures::createCard($this->identity);
+    }
 
-        $this->cardVerification = $this->card->verifyOn(new Verification(["processor" => "DUMMY_V1"]));
+    public function testRetrieveIdentity()
+    {
+        $identity = Identity::retrieve($this->identity->id);
+        $this->assertEquals($this->identity->id, $identity->id);
+    }
 
-        $this->pushFundTransfer = Fixtures::createTransfer([
+    public function testCreateMerchantUser() {
+        $this->markTestSkipped("https://github.com/verygoodgroup/api-spec/issues/333");
+        $user = $this->identity->createMerchantUser(new User([["enabled" => true]]));
+        self::assertNotNull($user->id);
+    }
+
+    public function testCreateBankAccountDirectly() {
+        $bankAccount = new BankAccount(
+            array(
+                "account_type"=> "SAVINGS",
+                "name"=> "Fran Lemke",
+                "tags"=> array(
+                    "Bank Account"=> "Company Account"
+                ),
+                "country"=> "USA",
+                "bank_code"=> "123123123",
+                "account_number"=> "123123123",
+                "type"=> "BANK_ACCOUNT",
+                "identity"=> $this->identity->id
+            ));
+        $bankAccount = $bankAccount->save();
+        self::assertNotNull($bankAccount->id, "Invalid bank account");
+    }
+
+    public function testCreatePaymentCardDirectly() {
+        $card = new PaymentCard([
+            "name" => "Joe Doe",
+            "expiration_month" => 12,
+            "expiration_year" => 2030,
+            "number" => "4111 1111 1111 1111",
+            "security_code" => 231,
+            "identity"=> $this->identity->id
+        ]);
+        $card = $card->save();
+        self::assertNotNull($card->id, "Invalid card");
+    }
+
+    public function testCreateWebhook() {
+        $webhook = Fixtures::createWebhook("https://tools.ietf.org/html/rfc2606");
+        self::assertNotNull($webhook->id);
+    }
+
+    public function testCreateToken() {
+        $token = Fixtures::createPaymentToken($this->application, $this->identity->id);
+        self::assertNotNull($token->id, "Payment token not created");
+    }
+
+    public function testCreateBankAccount() {
+        $bankAccount = Fixtures::createBankAccount($this->identity);
+        self::assertNotNull($bankAccount->id);
+    }
+
+    public function testVerifyIdentity() {
+        $verification = $this->identity->verifyOn(new Verification(["processor" => "DUMMY_V1"]));
+        self::assertEquals($verification->state, "PENDING");
+    }
+
+    public function testDebitTransfer() {
+        $transfer = Fixtures::createTransfer([
             "identity" => $this->card->identity,
             "amount" => Fixtures::$disputeAmount,
             "source" => $this->card->id,
             "tags" => ["_source" => "php_client"]
         ]);
-
-        self::assertEquals($this->pushFundTransfer->state, "PENDING", "Transfer not in pending state");
-
-        Fixtures::waitFor(function () {
-            $this->pushFundTransfer = $this->pushFundTransfer->refresh();
-            return $this->pushFundTransfer->state == "SUCCEEDED";
+        self::assertEquals($transfer->state, "PENDING", "Transfer not in pending state");
+        Fixtures::waitFor(function () use ($transfer) {
+            $transfer->refresh();
+            return $transfer->state == "SUCCEEDED";
         });
-
-        $this->bankAccount = Fixtures::createBankAccount($this->identity);
-
-        $this->webhook = Fixtures::createWebhook("https://tools.ietf.org/html/rfc2606");
+        return $transfer;
     }
 
     public function testCaptureAuthorization()
     {
-        $this->markTestSkipped('must be revisited, see https://github.com/verygoodgroup/processing/issues/2330#issue-190787250');
-        $this->authorization = Fixtures::createAuthorization($this->card, 100);
-        $this->authorization = $this->authorization->capture(10);
-        self::assertEquals($this->authorization->state, "SUCCEEDED", "Capture amount $10 of '" . $this->card->id . "' not succeeded");
+        $authorization = Fixtures::createAuthorization($this->card, 100);
+        $authorization = $authorization->capture([
+            "capture_amount"=> 100,
+            "fee"=> 10
+        ]);
+        self::assertEquals($authorization->state, "SUCCEEDED", "Capture amount $10 of '" . $this->card->id . "' not succeeded");
     }
 
     public function testReverseFunds()
     {
-        $this->pushFundTransferReversal = $this->pushFundTransfer->reverse(50);
-        self::assertEquals($this->pushFundTransferReversal->state, "PENDING", "Reverse not in pending state");
+        $transfer = $this->testDebitTransfer();
+        $transfer = $transfer->reverse(50);
+        self::assertEquals($transfer->state, "PENDING", "Reverse not in pending state");
     }
 
     public function testVoidAuthorization()
     {
-        $this->markTestSkipped('must be revisited, see https://github.com/verygoodgroup/processing/issues/2330#issue-190787250');
-        $this->identityVerification = $this->identity->verifyOn(new Verification(["processor" => "DUMMY_V1"]));
-        $this->authorization = Fixtures::createAuthorization($this->card, 100);
-        $this->authorization = $this->authorization->void(true);
-        self::assertTrue($this->authorization->is_void, "Authorization not void");
+        $authorization = Fixtures::createAuthorization($this->card, 100);
+        $authorization = $authorization->void(true);
+        self::assertTrue($authorization->is_void, "Authorization not void");
     }
 
     public function testSettlement()
     {
-        $this->markTestSkipped('must be revisited, ready_to_settle_at now too long to be completed');
-        $this->pushFundTransfer1 = Fixtures::createTransfer([
+        $transfer1 = Fixtures::createTransfer([
             "identity" => $this->card->identity,
             "amount" => 500,
             "source" => $this->card->id
         ]);
 
-        $this->pushFundTransfer2 = Fixtures::createTransfer([
+        $transfer2 = Fixtures::createTransfer([
             "identity" => $this->card->identity,
             "amount" => 300,
             "source" => $this->card->id
         ]);
 
-        Fixtures::waitFor(function () {
-            $this->pushFundTransfer1 = $this->pushFundTransfer1->refresh();
-            $this->pushFundTransfer2 = $this->pushFundTransfer2->refresh();
+        Fixtures::waitFor(function () use ($transfer1, $transfer2) {
+            $transfer1 = $transfer1->refresh();
+            $transfer2 = $transfer2->refresh();
 
-            return $this->pushFundTransfer1->state == "SUCCEEDED" and
-            $this->pushFundTransfer2->state == "SUCCEEDED" and
-            $this->pushFundTransfer1->ready_to_settle_at != null and
-            $this->pushFundTransfer2->ready_to_settle_at != null;
+            return $transfer1->state == "SUCCEEDED" and
+                $transfer2->state == "SUCCEEDED" and
+                $transfer1->ready_to_settle_at != null and
+                $transfer2->ready_to_settle_at != null;
         });
 
-        $this->settlement = Fixtures::createSettlement($this->identity);
+        $settlement = Fixtures::createSettlement($this->identity);
+        $this->assertNotNull($settlement->id);
     }
 
     public function testDispute() {
-        $disputePage = Dispute::getPagination($this->pushFundTransfer->getHref("disputes"));
+        $transfer = $this->testDebitTransfer();
+        $disputePage = Dispute::getPagination($transfer);
         $dispute = $disputePage->items[0];
         $file = $dispute->uploadEvidence($this->receiptImage);
         $this->assertEquals($file->dispute, $dispute->id);
     }
 
+    public function testCreateAndFetchInstrumentUpdate()
+    {
+        $identity = Fixtures::createIdentity();
+        Fixtures::createBankAccount($identity);
+        $merchant = Fixtures::provisionMerchant($identity);
+        $update = $this->card->createUpdate(new InstrumentUpdate(["merchant" => $merchant->id]));
+        $this->assertEquals($this->application->id, $update->application);
+
+        $fetchUpdate = InstrumentUpdate::retrieve(PaymentCard::getUpdateUri($this->card->id, $update->id));
+        $this->assertEquals($update->id, $fetchUpdate->id);
+    }
+
+    public function testGetAllInstrumentUpdates()
+    {
+        $this->testCreateAndFetchInstrumentUpdate();
+        $instrumentUpdatePage = InstrumentUpdate::getPagination($this->card);
+        foreach ($instrumentUpdatePage as $indexPage => $instrumentUpdates) {
+            foreach ($instrumentUpdates as $index => $instrumentUpdate) { // read the first page
+                $this->assertEquals($this->application->id, $instrumentUpdate->application);
+            }
+        }
+    }
+
+    public function testIterateAllTransfers()
+    {
+        for ($i = 0; $i <= 41; $i++) {
+            Fixtures::createTransfer([
+                "identity" => $this->card->identity,
+                "amount" => Fixtures::$disputeAmount,
+                "source" => $this->card->id,
+                "tags" => ["_source" => "php_client"]
+            ]);
+        }
+
+        $transferPage = Transfer::getPagination($this->card);
+        foreach ($transferPage as $indexPage => $items) {
+            foreach ($items as $index => $transfer) { // read the first page
+                $this->assertTrue($transfer->amount > 0);
+            }
+        }
+    }
 }

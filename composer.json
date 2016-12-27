@@ -17,6 +17,9 @@
     "phpunit/phpunit": "4.0.*"
   },
   "autoload": {
+    "psr-0": {
+      "testpayline\\": "./src"
+    },
     "psr-4": {
       "testpayline\\": "src"
     }
