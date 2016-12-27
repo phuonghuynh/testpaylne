@@ -1,0 +1,35 @@
+{
+  "name": "payline/payline-php",
+  "version": "1.0.2",
+  "description": "A PHP HTTP Client conforming to the HAL hypermedia type for the Payline processing API",
+  "license": "Apache2",
+  "authors": [
+    {
+      "name": "Payline Data",
+      "email": "support@paylinedata.com"
+    }
+  ],
+  "require": {
+    "php": ">=5.4.0",
+    "finix/processing-php": "==1.0.2"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "4.0.*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Payline\\": "src"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Payline\\Tests\\": "tests"
+    }
+  },
+  "repositories": [
+    {
+      "type":"path",
+      "url":"/Users/phuonghqh/Documents/working/processing-php-client"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# composer
+.buildpath
+composer.phar
+vendor/
+*~
+*#
+# phar
+*.phar
+.DS_Store
+
+# eclipse-pdt
+.settings
+.project
+*.iml
+.idea
+*.lock
+
+scenario.cache
+
+example-snippets.php
